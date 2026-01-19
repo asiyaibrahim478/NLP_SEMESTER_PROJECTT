@@ -1,4 +1,12 @@
 streamlit
+transformers
+torch
 PyPDF2
-python-docx
+pdfplumber
+beautifulsoup4
+requests
 nltk
+spacy
+speechrecognition
+pydub
+youtube-transcript-api
