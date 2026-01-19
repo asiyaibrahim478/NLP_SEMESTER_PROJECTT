@@ -5,8 +5,6 @@ pdfplumber
 beautifulsoup4
 requests
 nltk
-spacy
-en-core-web-sm==3.8.0
 speechrecognition
 pydub
 youtube-transcript-api
