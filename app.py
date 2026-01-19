@@ -68,12 +68,10 @@ from math import log
 nltk.download("punkt")
 nltk.download("stopwords")
 
-try:
-    nlp = spacy.load("en_core_web_sm")
-except:
-    import spacy.cli
-    spacy.cli.download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
+import spacy
+
+nlp = spacy.load("en_core_web_sm")
+
 
 @st.cache_resource
 def load_summarizer():
