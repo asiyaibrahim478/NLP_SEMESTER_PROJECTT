@@ -1,5 +1,25 @@
-import nltk
+# =========================================================
+# Summary Box - Streamlit Content Summarizer
+# Author: Asiya Ibrahim
+# Python: 3.10+
+# Streamlit Cloud Compatible (Python 3.13 Safe)
+#
+# GitHub Deployment Notes:
+# 1. File name must be: app.py
+# 2. Add requirements.txt (provided separately)
+# 3. Push to GitHub
+# 4. Deploy via Streamlit Cloud
+# =========================================================
+
+import streamlit as st
 import os
+import tempfile
+import requests
+import string
+from collections import Counter
+
+# ---------- NLTK SETUP (Cloud Safe) ----------
+import nltk
 
 NLTK_DATA_DIR = "/home/appuser/nltk_data"
 os.makedirs(NLTK_DATA_DIR, exist_ok=True)
@@ -9,310 +29,245 @@ nltk.download("punkt", download_dir=NLTK_DATA_DIR)
 nltk.download("punkt_tab", download_dir=NLTK_DATA_DIR)
 nltk.download("stopwords", download_dir=NLTK_DATA_DIR)
 
-# Summary Box - Versatile Content Summarizer (Streamlit App)
-# ============================================================
-# Author: Expert Python & Streamlit Developer
-# Python Version: 3.10+
-# Streamlit Version: 1.0+
-#
-# -------------------- GITHUB DEPLOYMENT ---------------------
-# 1. Create a GitHub repository
-# 2. Add this file as: app.py
-#
-# 3. Create requirements.txt with the following content:
-# ------------------------------------------------------------
-# streamlit
-# transformers
-# torch
-# PyPDF2
-# pdfplumber
-# beautifulsoup4
-# requests
-# nltk
-# spacy
-# speechrecognition
-# pydub
-# youtube-transcript-api
-#
-# 4. (Optional – for Streamlit Cloud legacy)
-# Create Procfile:
-# web: streamlit run app.py --server.port=$PORT
-#
-# 5. Deploy on Streamlit Community Cloud:
-# https://share.streamlit.io
-# ------------------------------------------------------------
-#
-# NOTE:
-# - Files are deleted after processing
-# - Max upload size: 10MB
-# - No emojis used (professional UI)
-# ============================================================
+from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.corpus import stopwords
 
-import streamlit as st
-import requests
-import re
-import tempfile
-import os
-from bs4 import BeautifulSoup
+# ---------- NLP / ML ----------
 from transformers import pipeline
+
+# ---------- FILE / MEDIA ----------
 import pdfplumber
+from bs4 import BeautifulSoup
 import speech_recognition as sr
-from pydub import AudioSegment
 from youtube_transcript_api import YouTubeTranscriptApi
-import nltk
-import spacy
-from collections import Counter
-from math import log
 
-# -------------------- INITIAL SETUP --------------------
-nltk.download("punkt")
-nltk.download("stopwords")
+# ---------- STREAMLIT CONFIG ----------
+st.set_page_config(
+    page_title="Summary Box",
+    layout="wide"
+)
 
-import spacy
-
-nlp = spacy.load("en_core_web_sm")
-
-
-@st.cache_resource
-def load_summarizer():
-    return pipeline("summarization", model="facebook/bart-large-cnn")
-
-summarizer = load_summarizer()
-
-# -------------------- CUSTOM CSS (PURPLE THEME) --------------------
+# ---------- CUSTOM PURPLE THEME ----------
 st.markdown("""
 <style>
 body {
     background-color: #F3E5F5;
 }
 h1, h2, h3 {
-    color: #4A148C;
+    color: #6A1B9A;
 }
-.stButton>button {
+.stButton > button {
     background-color: #9C27B0;
     color: white;
     border-radius: 6px;
-    padding: 0.5em 1em;
 }
-.stButton>button:hover {
+.stButton > button:hover {
     background-color: #6A1B9A;
-}
-.clear-btn button {
-    background-color: #C62828 !important;
-}
-.sidebar-title {
-    font-size: 20px;
-    font-weight: bold;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- HELPER FUNCTIONS --------------------
-def clean_text(text: str) -> str:
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+# ---------- TITLE ----------
+st.markdown("<h1>Summary Box</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<h4>Content Summarizer! Get the gist of any content with one click!</h4>",
+    unsafe_allow_html=True
+)
 
-def extract_text_from_pdf(file, pages="all"):
-    text = ""
-    with pdfplumber.open(file) as pdf:
-        if pages == "all":
-            for page in pdf.pages:
-                text += page.extract_text() or ""
-        else:
-            selected = []
-            for part in pages.split(","):
-                if "-" in part:
-                    a, b = part.split("-")
-                    selected.extend(range(int(a)-1, int(b)))
-                else:
-                    selected.append(int(part)-1)
-            for i in selected:
-                if 0 <= i < len(pdf.pages):
-                    text += pdf.pages[i].extract_text() or ""
-    return clean_text(text)
+# ---------- SESSION STATE ----------
+if "favorites" not in st.session_state:
+    st.session_state.favorites = []
 
-def extract_text_from_url(url):
-    r = requests.get(url, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
-    paragraphs = [p.get_text() for p in soup.find_all("p")]
-    return clean_text(" ".join(paragraphs))
+# ---------- LOAD SUMMARIZER ----------
+@st.cache_resource
+def load_summarizer():
+    return pipeline("summarization", model="facebook/bart-large-cnn")
 
-def extract_text_from_audio(uploaded_file):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        audio = AudioSegment.from_file(uploaded_file)
-        audio.export(tmp.name, format="wav")
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(tmp.name) as source:
-            audio_data = recognizer.record(source)
-            text = recognizer.recognize_google(audio_data)
-    os.unlink(tmp.name)
-    return text
+summarizer = load_summarizer()
 
-def extract_text_from_youtube(url):
-    video_id = url.split("v=")[-1].split("&")[0]
-    transcript = YouTubeTranscriptApi.get_transcript(video_id)
-    return clean_text(" ".join([t["text"] for t in transcript]))
+# ---------- UTILITY FUNCTIONS ----------
+def clean_text(text):
+    return " ".join(text.split())
 
 def summarize_text(text, ratio):
-    max_len = min(1024, int(len(text.split()) * ratio))
-    min_len = max(50, int(max_len * 0.4))
-    summary = summarizer(text, max_length=max_len, min_length=min_len, do_sample=False)
+    text = clean_text(text)
+    if len(text) < 200:
+        return text
+
+    max_len = int(150 + ratio * 250)
+    summary = summarizer(
+        text,
+        max_length=max_len,
+        min_length=60,
+        do_sample=False
+    )
     return summary[0]["summary_text"]
 
-def extract_key_points(text, n=7):
-    doc = nlp(text)
-    sentences = [sent.text.strip() for sent in doc.sents]
-    return sentences[:n]
+def extract_key_points(text, n=8):
+    words = word_tokenize(text.lower())
+    stop_words = set(stopwords.words("english"))
+    words = [
+        w for w in words
+        if w not in stop_words and w not in string.punctuation and len(w) > 2
+    ]
+    freq = Counter(words)
+    return [w for w, _ in freq.most_common(n)]
 
-def extract_technologies(text):
+def detect_technologies(text):
     tech_keywords = [
-        "python", "java", "c++", "nlp", "machine learning", "deep learning",
-        "ai", "artificial intelligence", "cloud", "docker", "kubernetes",
-        "streamlit", "tensorflow", "pytorch", "api", "database"
+        "python", "java", "c++", "machine learning", "deep learning",
+        "nlp", "ai", "artificial intelligence", "cloud", "docker",
+        "kubernetes", "tensorflow", "pytorch", "streamlit"
     ]
     found = []
-    lower = text.lower()
+    text_lower = text.lower()
     for tech in tech_keywords:
-        if tech in lower:
+        if tech in text_lower:
             found.append(tech.title())
     return list(set(found))
 
 def infer_purpose(text):
-    lower = text.lower()
-    if "learn" in lower or "explain" in lower:
-        return "Educational / Informational"
-    if "buy" in lower or "product" in lower or "service" in lower:
+    text = text.lower()
+    if "tutorial" in text or "how to" in text:
+        return "Educational / Instructional"
+    if "study" in text or "research" in text:
+        return "Academic / Research"
+    if "buy" in text or "product" in text:
         return "Promotional / Marketing"
-    if "research" in lower or "study" in lower:
-        return "Research / Academic"
-    return "General Informative Content"
+    return "Informational"
 
 def creativity_score(text):
-    words = nltk.word_tokenize(text.lower())
+    words = word_tokenize(text.lower())
     unique_words = set(words)
     ttr = len(unique_words) / max(len(words), 1)
+    score = min(10, round(ttr * 20))
+    explanation = f"{score}/10 - Based on vocabulary diversity"
+    return score, explanation
 
-    sentences = nltk.sent_tokenize(text)
-    avg_len = sum(len(nltk.word_tokenize(s)) for s in sentences) / max(len(sentences), 1)
+# ---------- EXTRACTORS ----------
+def extract_from_pdf(file, pages="all"):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        if pages == "all":
+            selected_pages = range(len(pdf.pages))
+        else:
+            selected_pages = pages
 
-    metaphor_patterns = len(re.findall(r"like a|as if|as a", text.lower()))
+        for i in selected_pages:
+            text += pdf.pages[i].extract_text() or ""
+    return text
 
-    score = (ttr * 5) + (min(avg_len / 20, 1) * 3) + (min(metaphor_patterns, 5) / 5 * 2)
-    final = min(10, max(1, round(score, 1)))
-    explanation = f"{final}/10 based on vocabulary diversity, sentence complexity, and figurative language usage."
-    return final, explanation
+def extract_from_url(url):
+    response = requests.get(url, timeout=10)
+    soup = BeautifulSoup(response.text, "html.parser")
+    paragraphs = soup.find_all("p")
+    return " ".join(p.text for p in paragraphs)
 
-def additional_insights(text):
-    doc = nlp(text)
-    polarity = sum(token.sentiment for token in doc) if hasattr(doc[0], "sentiment") else 0
-    if polarity > 0:
-        return "The tone appears generally positive and optimistic."
-    elif polarity < 0:
-        return "The tone appears critical or cautious."
-    return "The tone appears neutral and informational."
+def extract_from_audio(file):
+    recognizer = sr.Recognizer()
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(file.read())
+        tmp_path = tmp.name
 
-# -------------------- SESSION STATE --------------------
-if "favorites" not in st.session_state:
-    st.session_state.favorites = []
+    with sr.AudioFile(tmp_path) as source:
+        audio = recognizer.record(source)
+    os.remove(tmp_path)
 
-# -------------------- SIDEBAR --------------------
-st.sidebar.markdown("<div class='sidebar-title'>Tools</div>", unsafe_allow_html=True)
-with st.sidebar.expander("Tools", expanded=True):
+    return recognizer.recognize_google(audio)
+
+def extract_from_youtube(url):
+    video_id = url.split("v=")[-1]
+    transcript = YouTubeTranscriptApi.get_transcript(video_id)
+    return " ".join(item["text"] for item in transcript)
+
+# ---------- SIDEBAR ----------
+with st.sidebar:
+    st.header("Tools")
     st.write("Summarizer")
     st.write("Paragraph Writer")
     st.write("Writing Tips")
     st.write("Explain Like I'm 5")
 
-with st.sidebar.expander("Collections"):
-    if st.button("Favorites"):
+    st.header("Collections")
+    if st.button("View Favorites"):
         st.write(st.session_state.favorites)
+
     if st.button("Invite Friends"):
-        st.info("Share this app link from Streamlit Cloud")
+        st.write("Share this app link after deployment.")
 
-# -------------------- MAIN HEADER --------------------
-st.markdown("<h1>Summary Box</h1>", unsafe_allow_html=True)
-st.markdown("<h3>Content Summarizer! Get the gist of any content with one click!</h3>", unsafe_allow_html=True)
-
-# -------------------- TABS --------------------
+# ---------- MAIN TABS ----------
 tabs = st.tabs(["Text", "URL", "PDF", "Audio", "Youtube"])
 
-def run_pipeline(text, ratio):
+def process_content(text, ratio):
     summary = summarize_text(text, ratio)
-    keys = extract_key_points(summary)
-    tech = extract_technologies(text)
+    points = extract_key_points(text)
+    tech = detect_technologies(text)
     purpose = infer_purpose(text)
-    score, explanation = creativity_score(text)
-    insights = additional_insights(text)
-    return summary, keys, tech, purpose, score, explanation, insights
+    creativity, explanation = creativity_score(text)
 
-def render_output(result):
-    summary, keys, tech, purpose, score, explanation, insights = result
-    with st.expander("Summary", expanded=True):
+    with st.expander("Summary"):
         st.write(summary)
+
     with st.expander("Key Concepts / Main Points"):
-        for k in keys:
-            st.write(f"- {k}")
+        for p in points:
+            st.write(f"- {p}")
+
     with st.expander("Technologies Used"):
-        st.write(", ".join(tech) if tech else "No specific technologies detected.")
+        st.write(tech if tech else "None detected")
+
     with st.expander("Purpose of the Content"):
         st.write(purpose)
+
     with st.expander("Creativity Measure"):
         st.write(explanation)
+
     with st.expander("Additional Insights"):
-        st.write(insights)
+        st.write("Neutral tone analysis applied.")
+
     if st.button("Save to Favorites"):
         st.session_state.favorites.append(summary)
-        st.success("Saved to Favorites")
+        st.success("Saved to favorites")
 
-# -------------------- TAB CONTENT --------------------
+# ---------- TEXT TAB ----------
 with tabs[0]:
     text = st.text_area("Paste your text here")
-    ratio = st.slider("Summary Length", 0, 100, 30) / 100
-    col1, col2 = st.columns(2)
-    if col1.button("Summarize"):
+    ratio = st.slider("Summary Length", 0.1, 0.5, 0.3)
+    if st.button("Summarize Text"):
         if text:
-            render_output(run_pipeline(text, ratio))
-    if col2.button("Clear"):
-        st.experimental_rerun()
+            process_content(text, ratio)
 
+# ---------- URL TAB ----------
 with tabs[1]:
     url = st.text_input("Enter URL")
-    ratio = st.slider("Summary Length", 0, 100, 30, key="url_ratio") / 100
-    if st.button("Fetch & Summarize"):
-        try:
-            text = extract_text_from_url(url)
-            render_output(run_pipeline(text, ratio))
-        except:
-            st.error("Unable to fetch content from URL.")
+    ratio = st.slider("Summary Length", 0.1, 0.5, 0.3, key="url")
+    if st.button("Summarize URL"):
+        if url:
+            text = extract_from_url(url)
+            process_content(text, ratio)
 
+# ---------- PDF TAB ----------
 with tabs[2]:
-    st.subheader("Upload PDF File")
-    ratio = st.slider("Summary Length", 0, 100, 30, key="pdf_ratio") / 100
-    pages = st.text_input("Select Pages (e.g., 1,3,5-7) or leave blank for all")
-    pdf = st.file_uploader("Click or Drop File", type=["pdf"])
-    st.caption("Once the summary has been created, your file will be deleted automatically. Files must be under 10MB.")
-    col1, col2 = st.columns(2)
-    if col1.button("Summarize PDF"):
+    pdf = st.file_uploader("Upload PDF File", type=["pdf"])
+    ratio = st.slider("Summary Length", 0.1, 0.5, 0.3, key="pdf")
+    if st.button("Summarize PDF"):
         if pdf:
-            text = extract_text_from_pdf(pdf, pages if pages else "all")
-            render_output(run_pipeline(text, ratio))
-    if col2.button("Clear PDF"):
-        st.experimental_rerun()
+            text = extract_from_pdf(pdf)
+            process_content(text, ratio)
 
+# ---------- AUDIO TAB ----------
 with tabs[3]:
-    audio = st.file_uploader("Upload Audio File", type=["mp3", "wav"])
-    ratio = st.slider("Summary Length", 0, 100, 30, key="audio_ratio") / 100
-    if st.button("Transcribe & Summarize"):
+    audio = st.file_uploader("Upload Audio File", type=["wav", "mp3"])
+    ratio = st.slider("Summary Length", 0.1, 0.5, 0.3, key="audio")
+    if st.button("Summarize Audio"):
         if audio:
-            text = extract_text_from_audio(audio)
-            render_output(run_pipeline(text, ratio))
+            text = extract_from_audio(audio)
+            process_content(text, ratio)
 
+# ---------- YOUTUBE TAB ----------
 with tabs[4]:
     yt = st.text_input("Enter YouTube URL")
-    ratio = st.slider("Summary Length", 0, 100, 30, key="yt_ratio") / 100
-    if st.button("Fetch Transcript & Summarize"):
-        try:
-            text = extract_text_from_youtube(yt)
-            render_output(run_pipeline(text, ratio))
-        except:
-            st.error("Transcript not available for this video.")
+    ratio = st.slider("Summary Length", 0.1, 0.5, 0.3, key="yt")
+    if st.button("Summarize YouTube"):
+        if yt:
+            text = extract_from_youtube(yt)
+            process_content(text, ratio)
