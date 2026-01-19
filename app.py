@@ -1,4 +1,14 @@
-# ============================================================
+import nltk
+import os
+
+NLTK_DATA_DIR = "/home/appuser/nltk_data"
+os.makedirs(NLTK_DATA_DIR, exist_ok=True)
+nltk.data.path.append(NLTK_DATA_DIR)
+
+nltk.download("punkt", download_dir=NLTK_DATA_DIR)
+nltk.download("punkt_tab", download_dir=NLTK_DATA_DIR)
+nltk.download("stopwords", download_dir=NLTK_DATA_DIR)
+
 # Summary Box - Versatile Content Summarizer (Streamlit App)
 # ============================================================
 # Author: Expert Python & Streamlit Developer
