@@ -1,10 +1,9 @@
 streamlit
-transformers
+nltk
+transformers==4.44.0
 torch
 pdfplumber
 beautifulsoup4
 requests
-nltk
-speechrecognition
-pydub
+SpeechRecognition
 youtube-transcript-api
